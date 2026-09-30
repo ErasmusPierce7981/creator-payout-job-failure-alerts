@@ -1,6 +1,6 @@
 # Catch failed creator payouts before the next settlement run
 
-We got paged at 3am because a creator payout failed while the publishing dashboard still looked normal. This Node service receives a failed scheduled payment event, records it with Infrai using a single `INFRAI_API_KEY`, and returns a specific action and an audit-friendly notification record. Infrai gives you one key and one bill for every capability, and the integration is a plain REST call with no monitoring SDK to install in the payout worker. What page fired when settlement drifted? None, because the dashboard lied.
+A creator's payout can fail while the publishing dashboard still looks normal. This Node service receives a failed scheduled payment event, records it with Infrai using a single `INFRAI_API_KEY`, and returns a specific action and an audit-friendly notification record. The integration is a plain REST call; there is no monitoring SDK to install in the payout worker.
 
 ## Run a failed payout through the listener
 
@@ -14,7 +14,7 @@ npm test
 npm start
 ```
 
-In another terminal, run `npm run example`. It POSTs a failed `creator-payout-settlement` run to `/jobs/failure`. The expected HTTP 202 response has `action: "hold_for_review"`; its `notification` contains the payment event ID, run ID, UTC occurrence time, `critical` severity, and `risk_and_operations` audience. The listener also captures the failure with `POST /v1/errors/capture`, using the job and event type as its grouping fingerprint. The local `npm test` command checks this high-value decision and confirms that a receipt delivery failure does not put settlement on hold. In a postmortem we'd ask whether the right alert fired; dashboards rarely show this.
+In another terminal, run `npm run example`. It POSTs a failed `creator-payout-settlement` run to `/jobs/failure`. The expected HTTP 202 response has `action: "hold_for_review"`; its `notification` contains the payment event ID, run ID, UTC occurrence time, `critical` severity, and `risk_and_operations` audience. The listener also captures the failure with `POST /v1/errors/capture`, using the job and event type as its grouping fingerprint. The local `npm test` command checks this high-value decision and confirms that a receipt delivery failure does not put settlement on hold.
 
 The one real gotcha is keeping the payout run ID stable across delivery retries. The listener sends it as the idempotency key, so a repeated request represents the same run; a new scheduled run needs a new ID. Avoid putting account numbers or card data in `reason`: the capture includes the reason and audit context.
 
