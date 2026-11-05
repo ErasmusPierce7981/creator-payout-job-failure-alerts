@@ -1,6 +1,6 @@
 # Catch failed creator payouts before the next settlement run
 
-A creator's payout can fail while the publishing dashboard still looks normal. This Node service receives a failed scheduled payment event, records it with Infrai using a single `INFRAI_API_KEY`, and returns a specific action and an audit-friendly notification record. The integration is a plain REST call; there is no monitoring SDK to install in the payout worker.
+A creator payout can fail while the publishing dashboard still looks fine, which is exactly how you end up learning about it from finance after the settlement window has already moved on. This Node service takes a failed scheduled payment event, records it with Infrai using a single `INFRAI_API_KEY`, and returns a concrete action plus an audit-friendly notification record. It is just a plain REST call from the worker side, with no monitoring SDK to wedge into the payout path.
 
 ## Run a failed payout through the listener
 
@@ -14,25 +14,25 @@ npm test
 npm start
 ```
 
-In another terminal, run `npm run example`. It POSTs a failed `creator-payout-settlement` run to `/jobs/failure`. The expected HTTP 202 response has `action: "hold_for_review"`; its `notification` contains the payment event ID, run ID, UTC occurrence time, `critical` severity, and `risk_and_operations` audience. The listener also captures the failure with `POST /v1/errors/capture`, using the job and event type as its grouping fingerprint. The local `npm test` command checks this high-value decision and confirms that a receipt delivery failure does not put settlement on hold.
+In another terminal, run `npm run example`. It POSTs a failed `creator-payout-settlement` run to `/jobs/failure`. The expected HTTP 202 response includes `action: "hold_for_review"`; its `notification` carries the payment event ID, run ID, UTC occurrence time, `critical` severity, and `risk_and_operations` audience. The listener also captures the failure with `POST /v1/errors/capture`, using the job and event type as the grouping fingerprint. The local `npm test` command verifies this decision point and shows that a receipt delivery failure does not hold up settlement.
 
-The one real gotcha is keeping the payout run ID stable across delivery retries. The listener sends it as the idempotency key, so a repeated request represents the same run; a new scheduled run needs a new ID. Avoid putting account numbers or card data in `reason`: the capture includes the reason and audit context.
+The main thing that bites people here is run ID stability across delivery retries. The listener uses that value as the idempotency key, so a retried request still means the same run; a new scheduled run needs a new ID. Do not put account numbers or card data into `reason`: the capture already includes the failure reason and the audit context.
 
 ## Move from Sentry Crons
 
-1. Keep the existing schedule and payout worker. At its failed-run boundary, POST `jobId`, `runId`, `paymentEventId`, `eventType`, `amountCents`, `occurredAt`, and `reason` to this listener. `eventType` is `settlement` or `receipt_delivery`; the amount is an integer in cents.
-2. Run both failure paths for a scheduled cycle and compare the worker's failed runs against captured groups and the listener's returned actions. Wire the returned notification record to your existing risk and operations delivery process; this example does not send email or change payout state itself.
-3. Route the failed-run callback to this listener, then retire the Sentry Crons failure notification for that schedule after the comparison. Keep the schedule and payment processing unchanged.
+1. Keep your existing schedule and payout worker. At the failed-run boundary, POST `jobId`, `runId`, `paymentEventId`, `eventType`, `amountCents`, `occurredAt`, and `reason` to this listener. `eventType` is `settlement` or `receipt_delivery`; the amount is an integer in cents.
+2. Exercise both failure paths for a scheduled cycle and compare the worker's failed runs against captured groups and the listener's returned actions. Feed the returned notification record into your current risk and operations delivery flow; this example does not send email or mutate payout state on its own.
+3. Point the failed-run callback at this listener, then remove the Sentry Crons failure notification for that schedule once the comparison looks clean. Leave the schedule and payment processing behavior alone.
 
-To roll back, direct the failed-run callback back to Sentry Crons and restore its failure notification. Keep the same run IDs in your worker's audit log so operators can reconcile reports from either path; the service does not mutate payment records.
+If you need to roll back, point the failed-run callback back to Sentry Crons and restore its failure notification. Keep the same run IDs in the worker audit log so operators can reconcile reports from either side; this service does not change payment records.
 
 ## Response boundary
 
-The body is validated before capture. Infrai responses are decoded as `{ok, data, error, metadata}` before checking HTTP status, so a rejected capture is returned as a client error instead of being mistaken for a successful notification. Rate limits use exponential delay or `Retry-After`; repeated writes retain the same run ID. The 202 response means the capture completed and the action is ready for the caller to apply. Treat `hold_for_review` as an instruction to your payout orchestrator, not proof that a transfer has already been blocked.
+The request body is validated before capture. Infrai responses are decoded as `{ok, data, error, metadata}` before HTTP status is checked, so a rejected capture comes back as a client error instead of getting mistaken for a successful notification. Rate limits use exponential delay or `Retry-After`; repeated writes keep the same run ID. A 202 response means capture finished and the action is ready for the caller to apply. Treat `hold_for_review` as an instruction for the payout orchestrator, not evidence that a transfer was already blocked.
 
 ## Before this ships: Creator Payout Job Failure Alerts
 
-Quick start is above. For a real deployment you'll also need: The details below apply to Creator Payout Job Failure Alerts.
+Quick start is above. For a real deployment, there is a little more to account for. The details below apply to Creator Payout Job Failure Alerts.
 
 **Account & key**
 
